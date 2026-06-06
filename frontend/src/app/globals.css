@@ -1,0 +1,134 @@
+@import "tailwindcss";
+
+:root {
+  --background: 0 0% 98%;
+  --foreground: 220 20% 10%;
+  --muted: 220 10% 93%;
+  --muted-foreground: 220 10% 45%;
+  --primary: 250 80% 55%;
+  --primary-foreground: 0 0% 100%;
+  --border: 220 10% 88%;
+  --card: 0 0% 100%;
+  --accent: 250 100% 96%;
+  --accent-foreground: 250 80% 50%;
+  --success: 142 70% 45%;
+  --warning: 38 92% 50%;
+  --danger: 0 84% 60%;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --background: 220 20% 4%;
+    --foreground: 220 10% 92%;
+    --muted: 220 15% 10%;
+    --muted-foreground: 220 10% 55%;
+    --primary: 250 85% 65%;
+    --primary-foreground: 0 0% 100%;
+    --border: 220 15% 13%;
+    --card: 220 20% 6%;
+    --accent: 250 40% 12%;
+    --accent-foreground: 250 90% 75%;
+    --success: 142 75% 35%;
+    --warning: 38 92% 40%;
+    --danger: 0 84% 50%;
+  }
+}
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-border: hsl(var(--border));
+  --color-card: hsl(var(--card));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-success: hsl(var(--success));
+  --color-warning: hsl(var(--warning));
+  --color-danger: hsl(var(--danger));
+  
+  --font-sans: var(--font-geist-sans), Inter, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+}
+
+/* Base resets & Custom scrollbar */
+body {
+  background: hsl(var(--background));
+  color: hsl(var(--foreground));
+  font-family: var(--font-sans);
+  overflow: hidden;
+  height: 100vh;
+}
+
+/* Custom scrollbar matching dark/light system */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: hsl(var(--muted));
+  border-radius: 9999px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.4);
+}
+
+/* Utility Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* TipTap Editor Styles overrides */
+.ProseMirror {
+  outline: none;
+  min-height: 500px;
+}
+
+.ProseMirror p {
+  margin-bottom: 1.25em;
+  line-height: 1.75;
+}
+
+.ProseMirror h1 {
+  font-size: 2em;
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror h2 {
+  font-size: 1.5em;
+  font-weight: 600;
+  margin-top: 1.3em;
+  margin-bottom: 0.5em;
+}
+
+.ProseMirror table {
+  border-collapse: collapse;
+  margin: 1.5rem 0;
+  width: 100%;
+}
+
+.ProseMirror th, .ProseMirror td {
+  border: 1px solid hsl(var(--border));
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.ProseMirror th {
+  background-color: hsl(var(--muted));
+  font-weight: 600;
+}
