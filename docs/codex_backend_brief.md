@@ -104,3 +104,29 @@ API `/workspaces/{workspace_id}/chat` phải trả về luồng stream Server-Se
 
 ## 5. Hướng Dẫn Bắt Đầu
 Hãy bắt đầu bằng việc thiết lập môi trường, viết `requirements.txt` và khởi dựng bộ khung FastAPI (`main.py`, `config.py` và `database.py`). Hãy báo cáo tiến độ và mã nguồn cho người dùng để Antigravity có thể tiến hành code review và tích hợp Frontend tương ứng. Hãy nhớ gọi và tuân thủ các skill của bạn trước khi viết code!
+
+---
+
+## 6. Góp Ý & Phản Biện Chi Tiết Từ Code Review (Đợt Đánh Giá 06/06/2026)
+
+Qua đợt đánh giá mã nguồn backend hiện tại của Codex, Antigravity phát hiện các lỗ hổng/functional gaps nghiêm trọng cần giải quyết để đạt chuẩn **Production-Grade**:
+
+### 6.1. Bắt buộc tích hợp LangGraph thực tế (Chưa sử dụng)
+*   *Vấn đề*: Lớp `ResearchAgent` trong `app/services/agent.py` hiện tại là một luồng gọi hàm tuyến tính thô sơ (Linear RAG), không hề import hay sử dụng `langgraph` dù đã cài đặt thư viện. Hàm `_plan` và `_needs_user_clarification` đang dùng regex rất dễ lỗi thay vì gọi mô hình suy luận.
+*   *Yêu cầu*: Chuyển đổi toàn bộ lớp `ResearchAgent` sang cấu trúc `StateGraph` của LangGraph. Viết các Node rõ ràng (`planner`, `retriever`, `discrepancy_checker`, `writer`), và sử dụng conditional edge để phân loại luồng chạy.
+
+### 6.2. Thu thập chính xác số trang từ Docling (Mất metadata trang)
+*   *Vấn đề*: Hàm `parse_document_file` trong `app/services/parser.py` đang gộp toàn bộ nội dung parse được vào một `ParsedSection` duy nhất trên `page_label=1`. Điều này làm tất cả trích dẫn RAG hiển thị sai (luôn hiển thị Trang 1), khiến frontend không vẽ được highlight trên PDF Viewer.
+*   *Yêu cầu*: Duyệt qua từng phần tử bằng `document.iterate_items()` trong Docling, lấy đúng số trang gốc `item.prov[0].page_no` (1-indexed) để tạo các `ParsedSection` tương ứng với số trang thực tế.
+
+### 6.3. Khắc phục bottleneck tải lại mô hình Docling (ProcessPool weights reload)
+*   *Vấn đề*: Việc instantiate `DocumentConverter()` trong mỗi worker con của `ProcessPoolExecutor` khiến mô hình PyTorch phải load lại từ đĩa cứng vào bộ nhớ RAM mỗi lần tải lên một tài liệu (mất 5 - 10 giây).
+*   *Yêu cầu*: Khởi tạo `DocumentConverter` dưới dạng một Singleton giữ ấm (warm-up) một lần duy nhất tại startup (FastAPI lifespan) và tái sử dụng nó.
+
+### 6.4. Bổ sung cô lập Workspace & Xác thực (Broken Access Control)
+*   *Vấn đề*: SQLite có bảng `User` nhưng router `workspaces.py` lại trả về toàn bộ workspaces trong hệ thống cho bất kỳ ai gọi API (`db.scalars(select(Workspace))`). Chưa có JWT authentication middleware để bảo vệ các API.
+*   *Yêu cầu*: Thêm router đăng nhập/đăng ký, cấp JWT token, viết dependency xác thực token và lọc toàn bộ dữ liệu workspace theo `owner_id` (trừ chế độ Desktop App tự động bypass bằng local user).
+
+### 6.5. Cấu hình cục bộ cho Llama.cpp Server
+*   *Vấn đề*: Đường dẫn mặc định đến `D:\PROJECT\Agentic-AI\MiChat\llama-bin` chưa được cấu hình fallback, khiến LlamaProcessManager không khởi chạy được tiến trình llama-server.exe.
+*   *Yêu cầu*: Bổ sung biến môi trường `LLAMA_AUTO_ROOT` trong `.env` của backend chỉ định đường dẫn trên, và thêm cơ chế tự động tìm kiếm.
