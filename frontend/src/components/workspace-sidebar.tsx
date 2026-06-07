@@ -1,20 +1,10 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { Folder, Plus, FileText, Upload, RefreshCw, Layers } from "lucide-react";
-
-interface Workspace {
-  id: string;
-  name: string;
-  description?: string;
-}
-
-interface Document {
-  id: string;
-  filename: string;
-  size_bytes: number;
-  status: string;
-}
+import { API_BASE, apiFetch } from "@/lib/api";
+import { Workspace, Document } from "@/lib/types";
+import { useToast } from "@/lib/toast";
 
 interface WorkspaceSidebarProps {
   activeWorkspaceId: string;
@@ -33,76 +23,102 @@ export default function WorkspaceSidebar({
   const [newWorkspaceName, setNewWorkspaceName] = useState("");
   const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const { toast } = useToast();
 
-  const API_BASE = "http://localhost:8000";
-
-  // Fetch workspaces
-  const fetchWorkspaces = async () => {
+  // Fetch workspaces - wrapped in useCallback
+  const fetchWorkspaces = useCallback(async () => {
     try {
-      const res = await fetch(`${API_BASE}/workspaces`);
+      const res = await apiFetch(`${API_BASE}/workspaces`);
       if (res.ok) {
-        const data = await res.json();
+        const data: Workspace[] = await res.json();
         setWorkspaces(data);
         if (data.length > 0 && !activeWorkspaceId) {
-          setActiveWorkspaceId(data[0].id);
+          // Defer state updates to avoid synchronous rendering inside effects
+          setTimeout(() => {
+            setActiveWorkspaceId(data[0].id);
+          }, 0);
         }
+      } else {
+        toast("Không thể tải danh sách không gian làm việc từ máy chủ.", "error");
       }
     } catch (err) {
       console.error("Failed to fetch workspaces", err);
+      toast("Lỗi kết nối máy chủ khi tải không gian làm việc.", "error");
     }
-  };
+  }, [activeWorkspaceId, setActiveWorkspaceId, toast]);
 
-  // Fetch documents for active workspace
-  const fetchDocuments = async () => {
+  // Fetch documents for active workspace - wrapped in useCallback
+  const fetchDocuments = useCallback(async () => {
     if (!activeWorkspaceId) return;
     setIsLoading(true);
     try {
-      // In a real database, we would query files for the workspace. 
-      // For now, if default workspaces are returned, we mock or fetch them.
-      // We will mock some files if API returns empty, to show a rich UI.
-      const mockFiles: Record<string, Document[]> = {
-        default: [
-          { id: "1", filename: "tesla_battery_report.pdf", size_bytes: 2048500, status: "indexed" },
-          { id: "2", filename: "byd_blade_battery.pdf", size_bytes: 1540300, status: "indexed" },
-        ],
-        finance: [
-          { id: "3", filename: "q4_financials.pdf", size_bytes: 3102400, status: "parsing" },
-        ],
-      };
-      setDocuments(mockFiles[activeWorkspaceId] || []);
+      const res = await apiFetch(`${API_BASE}/workspaces/${activeWorkspaceId}/documents`);
+      if (res.ok) {
+        const data: Document[] = await res.json();
+        setDocuments(data);
+      } else {
+        toast("Không thể tải danh sách tài liệu từ không gian làm việc.", "error");
+      }
     } catch (err) {
       console.error("Failed to fetch documents", err);
+      toast("Lỗi kết nối máy chủ khi tải tài liệu.", "error");
     } finally {
       setIsLoading(false);
     }
-  };
+  }, [activeWorkspaceId, toast]);
 
+  // Load workspaces on mount
   useEffect(() => {
-    fetchWorkspaces();
-  }, []);
+    const loadData = async () => {
+      await fetchWorkspaces();
+    };
+    loadData();
+  }, [fetchWorkspaces]);
 
+  // Load documents when activeWorkspaceId changes
   useEffect(() => {
-    fetchDocuments();
-  }, [activeWorkspaceId]);
+    const loadDocs = async () => {
+      await fetchDocuments();
+    };
+    loadDocs();
+  }, [activeWorkspaceId, fetchDocuments]);
+
+  // Poll for document processing status if any document is parsing/pending
+  useEffect(() => {
+    const needsPolling = documents.some(
+      (doc) => doc.status === "parsing" || doc.status === "pending"
+    );
+    if (!needsPolling) return;
+
+    const interval = setInterval(() => {
+      fetchDocuments();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [documents, fetchDocuments]);
 
   const handleCreateWorkspace = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newWorkspaceName.trim()) return;
     try {
-      const res = await fetch(`${API_BASE}/workspaces`, {
+      const res = await apiFetch(`${API_BASE}/workspaces`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ name: newWorkspaceName }),
       });
       if (res.ok) {
-        const newWs = await res.json();
-        setWorkspaces((prev) => [...prev, newWs.data]);
-        setActiveWorkspaceId(newWs.data.id);
+        const newWs: Workspace = await res.json();
+        setWorkspaces((prev) => [...prev, newWs]);
+        setActiveWorkspaceId(newWs.id);
         setNewWorkspaceName("");
         setIsCreatingWorkspace(false);
+        toast(`Đã tạo không gian làm việc "${newWs.name}" thành công!`, "success");
+      } else {
+        toast("Yêu cầu tạo không gian làm việc thất bại.", "error");
       }
     } catch (err) {
       console.error("Failed to create workspace", err);
+      toast("Gặp lỗi khi gửi yêu cầu tạo không gian làm việc.", "error");
     }
   };
 
@@ -114,32 +130,25 @@ export default function WorkspaceSidebar({
     const formData = new FormData();
     formData.append("file", fileList[0]);
 
+    toast("Đang bắt đầu tải tệp lên...", "info");
     try {
-      const res = await fetch(`${API_BASE}/workspaces/${activeWorkspaceId}/upload`, {
+      const res = await apiFetch(`${API_BASE}/workspaces/${activeWorkspaceId}/upload`, {
         method: "POST",
         body: formData,
       });
 
       if (res.ok) {
-        const uploadedDoc = await res.json();
-        // Add to list as parsing
-        const newDoc: Document = {
-          id: Math.random().toString(),
-          filename: uploadedDoc.filename,
-          size_bytes: uploadedDoc.size_bytes,
-          status: "parsing",
-        };
-        setDocuments((prev) => [...prev, newDoc]);
-        
-        // Mock finish parsing after 5s
-        setTimeout(() => {
-          setDocuments((prev) =>
-            prev.map((d) => (d.filename === newDoc.filename ? { ...d, status: "indexed" } : d))
-          );
-        }, 5000);
+        const uploadedDoc: Document = await res.json();
+        setDocuments((prev) => [uploadedDoc, ...prev]);
+        toast(`Tải lên "${uploadedDoc.filename}" thành công! Đang tiến hành phân tích cú pháp...`, "success");
+        // Trigger refetch
+        fetchDocuments();
+      } else {
+        toast("Tải tệp lên thất bại. Định dạng không được hỗ trợ hoặc tệp quá lớn.", "error");
       }
     } catch (err) {
       console.error("Upload failed", err);
+      toast("Lỗi kết nối máy chủ khi tải tệp lên.", "error");
     } finally {
       setIsUploading(false);
     }
@@ -161,7 +170,7 @@ export default function WorkspaceSidebar({
           </span>
           <button
             onClick={() => setIsCreatingWorkspace(!isCreatingWorkspace)}
-            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors"
+            className="p-1 hover:bg-muted rounded text-muted-foreground hover:text-foreground transition-colors cursor-pointer"
           >
             <Plus className="h-3.5 w-3.5" />
           </button>
@@ -181,13 +190,13 @@ export default function WorkspaceSidebar({
               <button
                 type="button"
                 onClick={() => setIsCreatingWorkspace(false)}
-                className="px-2 py-1 text-[10px] rounded hover:bg-muted text-muted-foreground"
+                className="px-2 py-1 text-[10px] rounded hover:bg-muted text-muted-foreground cursor-pointer"
               >
                 Hủy
               </button>
               <button
                 type="submit"
-                className="px-2 py-1 text-[10px] rounded bg-primary text-primary-foreground font-semibold"
+                className="px-2 py-1 text-[10px] rounded bg-primary text-primary-foreground font-semibold cursor-pointer"
               >
                 Tạo
               </button>
@@ -200,7 +209,7 @@ export default function WorkspaceSidebar({
             <button
               key={ws.id}
               onClick={() => setActiveWorkspaceId(ws.id)}
-              className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors font-medium ${
+              className={`flex items-center gap-2 px-2 py-1.5 rounded text-xs text-left transition-colors font-medium cursor-pointer ${
                 activeWorkspaceId === ws.id
                   ? "bg-accent text-accent-foreground"
                   : "hover:bg-muted/50 text-muted-foreground hover:text-foreground"
@@ -221,7 +230,7 @@ export default function WorkspaceSidebar({
           </span>
           <button
             onClick={fetchDocuments}
-            className="p-1 hover:bg-muted rounded text-muted-foreground transition-colors"
+            className="p-1 hover:bg-muted rounded text-muted-foreground transition-colors cursor-pointer"
           >
             <RefreshCw className={`h-3 w-3 ${isLoading ? "animate-spin" : ""}`} />
           </button>
@@ -263,18 +272,24 @@ export default function WorkspaceSidebar({
                 </div>
                 <div className="flex items-center justify-between mt-1">
                   <span className="text-[10px] text-muted-foreground">
-                    {(doc.size_bytes / (1024 * 1024)).toFixed(2)} MB
+                    {(doc.file_size / (1024 * 1024)).toFixed(2)} MB
                   </span>
                   <span
-                    className={`text-[9px] px-1 rounded-full font-semibold ${
+                    className={`text-[9px] px-1.5 py-0.5 rounded font-semibold ${
                       doc.status === "indexed"
-                        ? "bg-success/10 text-success"
-                        : doc.status === "parsing"
-                        ? "bg-warning/10 text-warning animate-pulse"
-                        : "bg-danger/10 text-danger"
+                        ? "bg-success/15 text-success"
+                        : doc.status === "parsing" || doc.status === "pending"
+                        ? "bg-warning/15 text-warning animate-pulse"
+                        : "bg-danger/15 text-danger"
                     }`}
                   >
-                    {doc.status === "indexed" ? "Đã nạp" : "Đang xử lý"}
+                    {doc.status === "indexed"
+                      ? "Đã nạp"
+                      : doc.status === "parsing"
+                      ? "Đang phân tích"
+                      : doc.status === "pending"
+                      ? "Đang chờ"
+                      : "Lỗi"}
                   </span>
                 </div>
               </div>

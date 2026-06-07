@@ -2,6 +2,8 @@
 
 import React, { useState, useEffect, useRef } from "react";
 import { ChevronLeft, ChevronRight, ZoomIn, ZoomOut, AlertCircle, FileText, Loader } from "lucide-react";
+import type { PDFDocumentProxy, RenderTask } from "pdfjs-dist";
+import { API_BASE, apiFetch, authHeaders } from "@/lib/api";
 
 interface PDFViewerProps {
   documentInfo: {
@@ -10,67 +12,88 @@ interface PDFViewerProps {
     page?: number;
     highlightText?: string;
   } | null;
+  workspaceId: string;
 }
 
-export default function PDFViewer({ documentInfo }: PDFViewerProps) {
+interface TextItem {
+  str: string;
+  transform: number[];
+  width: number;
+  height: number;
+}
+
+export default function PDFViewer({ documentInfo, workspaceId }: PDFViewerProps) {
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(15);
   const [zoom, setZoom] = useState(100);
-  const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [pdfDoc, setPdfDoc] = useState<PDFDocumentProxy | null>(null);
   const [isPdfLoading, setIsPdfLoading] = useState(false);
   const [highlights, setHighlights] = useState<{ left: number; top: number; width: number; height: number }[]>([]);
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const renderTaskRef = useRef<any>(null);
+  const renderTaskRef = useRef<RenderTask | null>(null);
 
   // Sync page from parent info
   useEffect(() => {
     if (documentInfo && documentInfo.page) {
-      setCurrentPage(documentInfo.page);
+      setTimeout(() => {
+        setCurrentPage(documentInfo.page!);
+      }, 0);
     }
   }, [documentInfo]);
 
   // Load PDF document on source changes
   useEffect(() => {
     if (!documentInfo) {
-      setPdfDoc(null);
+      setTimeout(() => {
+        setPdfDoc(null);
+      }, 0);
       return;
     }
 
     let active = true;
-    setIsPdfLoading(true);
-    setHighlights([]);
+    setTimeout(() => {
+      setIsPdfLoading(true);
+      setHighlights([]);
+    }, 0);
 
     const loadPDF = async () => {
       try {
-        const fileUrl = `http://localhost:8000/workspaces/default/documents/${documentInfo.id}/file`;
+        const fileUrl = `${API_BASE}/workspaces/${workspaceId}/documents/${documentInfo.id}/file`;
         
         // Try checking if backend serves the file. If not, fallback to mockup
-        const testRes = await fetch(fileUrl, { method: "HEAD" }).catch(() => null);
+        const testRes = await apiFetch(fileUrl, { method: "HEAD" }).catch(() => null);
         if (!testRes || !testRes.ok) {
           if (active) {
-            setPdfDoc(null);
-            setIsPdfLoading(false);
+            setTimeout(() => {
+              setPdfDoc(null);
+              setIsPdfLoading(false);
+            }, 0);
           }
           return;
         }
 
         const pdfjs = await import("pdfjs-dist");
-        pdfjs.GlobalWorkerOptions.workerSrc = `https://cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.mjs`;
+        // Use local worker bundled in public directory for full offline compliance
+        pdfjs.GlobalWorkerOptions.workerSrc = "/pdf.worker.min.mjs";
 
-        const loadingTask = pdfjs.getDocument({ url: fileUrl });
+        const loadingTask = pdfjs.getDocument({ url: fileUrl, httpHeaders: authHeaders() });
         const doc = await loadingTask.promise;
 
         if (active) {
-          setPdfDoc(doc);
-          setTotalPages(doc.numPages);
-          setIsPdfLoading(false);
+          setTimeout(() => {
+            setPdfDoc(doc);
+            setTotalPages(doc.numPages);
+            setIsPdfLoading(false);
+          }, 0);
         }
       } catch (err) {
         console.warn("Failed to load PDF, falling back to simulated document view:", err);
         if (active) {
-          setPdfDoc(null);
-          setIsPdfLoading(false);
+          setTimeout(() => {
+            setPdfDoc(null);
+            setIsPdfLoading(false);
+          }, 0);
         }
       }
     };
@@ -80,7 +103,7 @@ export default function PDFViewer({ documentInfo }: PDFViewerProps) {
     return () => {
       active = false;
     };
-  }, [documentInfo]);
+  }, [documentInfo, workspaceId]);
 
   // Render canvas page and highlights when pdfDoc, page, or zoom changes
   useEffect(() => {
@@ -107,6 +130,7 @@ export default function PDFViewer({ documentInfo }: PDFViewerProps) {
         canvas.width = viewport.width;
 
         const renderContext = {
+          canvas,
           canvasContext: context,
           viewport: viewport,
         };
@@ -119,11 +143,12 @@ export default function PDFViewer({ documentInfo }: PDFViewerProps) {
         if (documentInfo?.highlightText && active) {
           const textContent = await page.getTextContent();
           const query = documentInfo.highlightText.toLowerCase();
-          const matches = textContent.items.filter((item: any) =>
+          const items = textContent.items as unknown as TextItem[];
+          const matches = items.filter((item) =>
             item.str && item.str.toLowerCase().includes(query)
           );
 
-          const newHighlights = matches.map((item: any) => {
+          const newHighlights = matches.map((item) => {
             const [x, y] = viewport.convertToViewportPoint(item.transform[4], item.transform[5]);
             const itemHeight = item.height * (zoom / 100);
             return {
@@ -136,9 +161,10 @@ export default function PDFViewer({ documentInfo }: PDFViewerProps) {
 
           setHighlights(newHighlights);
         }
-      } catch (err: any) {
-        if (err.name !== "RenderingCancelledException") {
-          console.error("PDF rendering error:", err);
+      } catch (err: unknown) {
+        const error = err as Error;
+        if (error.name !== "RenderingCancelledException") {
+          console.error("PDF rendering error:", error);
         }
       }
     };
@@ -163,29 +189,21 @@ export default function PDFViewer({ documentInfo }: PDFViewerProps) {
 
   // Simulated content fallback
   const getSimulatedPageContent = (page: number) => {
-    if (documentInfo?.filename.includes("tesla")) {
-      if (page === 12) {
-        return {
-          title: "Chương 3: Tối ưu hóa Cell pin 4680 của Tesla",
-          text: "Trong nỗ lực giảm chi phí sản xuất và nâng cao hiệu suất vận hành, Tesla đã công bố cell pin hình trụ 4680 mới. Công nghệ pin 4680 mang lại sự tăng trưởng 16% về cự ly di chuyển (range) chỉ nhờ sự tối ưu hóa dạng hình học (form factor). Thiết kế tabless (không vấu cực) giúp giảm quãng đường dịch chuyển của electron, giảm điện trở trong và giải quyết hiệu quả vấn đề tỏa nhiệt của pin hình trụ cỡ lớn. Quy trình sản xuất cực khô (dry electrode process) cũng hứa hẹn giảm 50% chi phí đầu tư nhà máy.",
-        };
-      }
-      return {
-        title: `Báo cáo Kỹ thuật Tesla - Trang ${page}`,
-        text: `Nội dung tài liệu kỹ thuật về xe điện Tesla liên quan đến cấu trúc khung xe gầm liền khối (Mega Casting) và tích hợp khối pin trực tiếp vào sàn xe (Structural Battery Pack). Phần này trình bày các chỉ số chịu lực cơ học, hiệu quả tối ưu hóa trọng lượng xe lên tới 10% và khả năng giảm số lượng chi tiết lắp ráp từ 70 chi tiết xuống còn 1 chi tiết đúc nguyên khối duy nhất.`,
-      };
-    }
+    const filename = documentInfo ? documentInfo.filename : "document.pdf";
+    const highlight = documentInfo?.highlightText || "";
 
-    if (documentInfo?.filename.includes("byd")) {
-      return {
-        title: `Công nghệ Blade Battery của BYD - Trang ${page}`,
-        text: `Blade Battery là công nghệ pin Lithium Iron Phosphate (LFP) được BYD giới thiệu vào năm 2020. Thiết kế cell pin siêu dài giống hình lưỡi dao giúp xếp khít trực tiếp vào pack pin (Cell-to-Pack), nâng cao mật độ năng lượng thể tích lên tới 50% so với cấu trúc pin LFP truyền thống. Điểm vượt trội lớn nhất của pin Blade là khả năng vượt qua bài kiểm tra châm kim (nail penetration test) khắc nghiệt mà không sinh khói hay bốc cháy, duy trì mức nhiệt ổn định dưới 60 độ C.`,
-      };
+    const baseText = `Nội dung văn bản được phân tích và trích xuất thành công từ tài liệu "${filename}". Hệ thống sử dụng mô-đun phân tích Docling Reader cục bộ để định dạng cấu trúc đoạn văn, bảng biểu và đồng bộ hóa chỉ mục RAG.`;
+    let pageText = `${baseText} Trang số ${page} chứa các phân tích kỹ thuật, dữ liệu so sánh và chỉ số hiệu năng tương ứng với nội dung tài liệu gốc. `;
+
+    if (highlight) {
+      pageText += `Đoạn văn bản trích dẫn liên quan trực tiếp đến truy vấn của bạn: "${highlight}"`;
+    } else {
+      pageText += `Nếu muốn hiển thị hình ảnh bản quét PDF gốc cùng với layout chính xác của nhà xuất bản, xin vui lòng kiểm tra trạng thái ingestion và đảm bảo file đã được lưu trữ vật lý đầy đủ trong Workspace của bạn.`;
     }
 
     return {
-      title: documentInfo ? `${documentInfo.filename} - Trang ${page}` : "Tài liệu mẫu",
-      text: "Đang tải nội dung văn bản gốc từ bộ nhớ dữ liệu RAG cục bộ. Hệ thống sử dụng Docling Reader để trích xuất cấu trúc văn bản và đồng bộ tọa độ trang.",
+      title: `${filename} — Trang ${page}`,
+      text: pageText,
     };
   };
 

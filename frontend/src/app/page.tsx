@@ -1,12 +1,14 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
+import AuthDialog from "@/components/auth-dialog";
 import WorkspaceSidebar from "@/components/workspace-sidebar";
 import WorkspaceLayout from "@/components/workspace-layout";
 
 export default function Home() {
-  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("default");
-  const [selectedFile, setSelectedFile] = useState<{ id: string; filename: string } | null>(null);
+  const [activeWorkspaceId, setActiveWorkspaceId] = useState<string>("");
+  const [authRequired, setAuthRequired] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<{ id: string; filename: string; timestamp?: number } | null>(null);
   const [pdfViewerDoc, setPdfViewerDoc] = useState<{
     id: string;
     filename: string;
@@ -15,11 +17,26 @@ export default function Home() {
   } | null>(null);
 
   const handleSelectFile = (file: { id: string; filename: string }) => {
-    setSelectedFile({ ...file, timestamp: Date.now() } as any); // force update hook trigger
+    setSelectedFile({ ...file, timestamp: Date.now() }); // force update hook trigger
   };
+
+  useEffect(() => {
+    const shouldRequireAuth =
+      process.env.NEXT_PUBLIC_AUTH_REQUIRED === "true" &&
+      !window.localStorage.getItem("access_token");
+    if (shouldRequireAuth) {
+      setAuthRequired(true);
+    }
+
+    const showAuth = () => setAuthRequired(true);
+    window.addEventListener("auth-required", showAuth);
+    return () => window.removeEventListener("auth-required", showAuth);
+  }, []);
 
   return (
     <main className="flex h-screen w-screen overflow-hidden bg-background">
+      <AuthDialog open={authRequired} />
+
       {/* Sidebar: Workspaces & Local Files Ingestion */}
       <WorkspaceSidebar
         activeWorkspaceId={activeWorkspaceId}
